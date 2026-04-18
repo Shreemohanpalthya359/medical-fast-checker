@@ -48,6 +48,49 @@ We specifically engineered the stack to prioritize maximum throughput, zero-late
 </div>
 <br/>
 
+### 🌊 Data Flow & Logic Map
+```mermaid
+graph TD
+    A[User Frontend UI] -->|Submits Claim/Image/PDF| B(Flask API Gateway)
+    
+    subparse[Document Processing]
+    B -->|Direct Image| C[Llama 4 Scout Vision Edge]
+    B -->|PDF Uploads| D[PyPDFLoader Text Extraction]
+    B -->|Claim Strings| E[HuggingFace Embedder]
+    
+    E -->|Similarity Metric| F[(ChromaDB Vector Store)]
+    F -->|Top-k Curated Hits| G
+    
+    B -->|Async Scrape| H[Bio.Entrez PubMed API]
+    H -->|Latest Academic Abstracts| G
+    
+    G{Meta-Llama Context Aggregator} -->|Prompt Template Injection| I[Groq Llama-3.1-8B]
+    
+    I -->|Verification Verdict & JSON| J[Telemetry & Stats SQLite]
+    I -->|Clinical Answer| A
+```
+
+### 📂 Project Folder Structure
+```text
+medical-fact-checker/
+│
+├── frontend/                  # React Application
+│   ├── src/
+│   │   ├── components/        # Dashboards, Charts, Verification UI
+│   │   ├── api.js             # HTTP Hooks
+│   │   └── index.css          # Tailwind & Micro-animations
+│   └── package.json           # Vite Configuration
+│
+├── backend/                   # Python Flask Server
+│   ├── app.py                 # REST Endpoints (/fact-check, /analyze-image)
+│   ├── rag_engine.py          # AI Orchestration (LangChain, Groq, Chroma)
+│   ├── chroma_db/             # Auto-persisted Vector Embeddings
+│   └── instance/              # SQLite Database
+│
+├── assets/                    # Project Media
+└── README.md                  # System Documentation
+```
+
 Our Hybrid-RAG pipeline is designed to fuse local knowledge with live external consensus:
 
 1. **Query Ingestion:** The user uploads a claim (text), a batch of claims, a PDF document, or an Image (MRI/Report).
