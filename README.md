@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/DNA_sequence_and_structure.svg/1024px-DNA_sequence_and_structure.svg.png" alt="Logo" width="120" height="auto" />
+  <img src="./assets/logo.png" alt="Aegis QA Logo" width="180" height="auto" style="border-radius: 20%; box-shadow: 0 4px 15px rgba(0,255,255,0.2);" />
   
   # Automated Fast Checking of Medical Information using LLM and Vector Search
 
