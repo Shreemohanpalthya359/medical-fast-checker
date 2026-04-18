@@ -25,6 +25,23 @@ Whether you're batch-processing a dozen claims, uploading a text-heavy PDF blood
 
 <br/>
 
+## 📖 Project Explanation & Context
+
+This system was developed as a comprehensive final project for a **Data Science Minor Degree**. It demonstrates an advanced, full-stack understanding of AI Agents, Retrieval-Augmented Generation (RAG) paradigms, and modern application development.
+
+### ⚠️ The Problem Statement
+The internet is oversaturated with unverified medical advice. The general public lacks access to validated clinical databases, and medical professionals spend countless hours manually cross-referencing patient records with recent literature. Existing generalized AI models (like ChatGPT) suffer from "hallucinations"—confidently inventing fake medical facts that could prove dangerous.
+
+### 💡 The Solution
+Aegis Medical Intelligence solves this by forcibly grounding the AI's logic strictly against factual medical frameworks. We discard the AI's "guessed" knowledge and instead force it to read live scientific research from the **NIH PubMed Database** and verified curated chunks housed in **ChromaDB**. 
+
+### 🎯 Core Objectives
+- **Data Engineering:** Build an autonomous pipeline that cleans, embeds (`HuggingFace`), and vectors medical texts into semantic space.
+- **API Architecture:** Establish secure, ultra-low-latency bidirectional streaming between a React client and Python compute nodes.
+- **Multimodal capabilities:** Provide simultaneous capacity to "read" text claims natively, parse clinical documents (PDFs), and interpret abstract visual features (MRIs/Scans).
+
+<br/>
+
 ## 🛠️ Technology Stack
 
 We specifically engineered the stack to prioritize maximum throughput, zero-latency inference, and a highly interactive, dynamic frontend:
