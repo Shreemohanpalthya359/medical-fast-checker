@@ -5,7 +5,13 @@ langchain
 langchain-groq
 langchain-huggingface
 langchain-community
+langchain-chroma
 chromadb
 sentence-transformers
 pypdf
 werkzeug
+flask-sqlalchemy
+flask-jwt-extended
+google-genai
+biopython
+fpdf2

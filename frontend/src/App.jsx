@@ -1,18 +1,39 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import MedicalDashboard from './components/MedicalDashboard';
+import LandingPage from './components/LandingPage';
+import Auth from './components/Auth';
 
 function App() {
+  const [view, setView] = useState('landing'); // landing, auth, dashboard
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const username = localStorage.getItem('username');
+    if (token && username) {
+      setUser({ username });
+      setView('dashboard');
+    }
+  }, []);
+
+  const handleAuthSuccess = (data) => {
+    setUser({ username: data.username });
+    setView('dashboard');
+  };
+
   return (
-    <div className="min-h-screen relative overflow-hidden bg-slate-950 font-sans text-slate-100">
-      {/* Background Orbs */}
-      <div className="bg-blob bg-medical-600/20 w-[600px] h-[600px] top-[-100px] left-[-200px]" />
-      <div className="bg-blob bg-blue-600/20 w-[500px] h-[500px] bottom-[-100px] right-[-100px]" style={{ animationDelay: '2s' }} />
-      <div className="bg-blob bg-emerald-600/10 w-[400px] h-[400px] top-[40%] left-[30%]" style={{ animationDelay: '5s' }} />
+    <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
+      {view === 'landing' && (
+        <LandingPage onGetStarted={() => setView('auth')} />
+      )}
       
-      {/* Main Content */}
-      <div className="relative z-10">
-        <MedicalDashboard />
-      </div>
+      {view === 'auth' && (
+        <Auth onAuthSuccess={handleAuthSuccess} />
+      )}
+
+      {view === 'dashboard' && (
+        <MedicalDashboard user={user} />
+      )}
     </div>
   );
 }

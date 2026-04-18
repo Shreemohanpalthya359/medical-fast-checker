@@ -1,27 +1,82 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
+import uuid
+from datetime import datetime
 from werkzeug.utils import secure_filename
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from werkzeug.security import generate_password_hash, check_password_hash
 from rag_engine import MedicalRAGEngine
+from fpdf import FPDF
 
 app = Flask(__name__)
-# Enable CORS for the frontend React app running on port 5173
+# Enable CORS
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+# Configuration
+app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "super-secret-key")
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///medical_fact_checker.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "jwt-secret-key")
+
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+# Database Models
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(120), nullable=False)
+    history = db.relationship('FactCheckHistory', backref='user', lazy=True)
+
+class FactCheckHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    claim = db.Column(db.Text, nullable=False)
+    verdict = db.Column(db.String(20), nullable=False)
+    confidence = db.Column(db.Integer)
+    explanation = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    report_path = db.Column(db.String(255))
+
+with app.app_context():
+    db.create_all()
+
 UPLOAD_FOLDER = './uploads'
+REPORT_FOLDER = './reports'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(REPORT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['REPORT_FOLDER'] = REPORT_FOLDER
 
-# Initialize the RAG engine
-# It will load the Chroma database if it already exists, or create an empty one
-print("Initializing RAG Engine...")
 rag_engine = MedicalRAGEngine()
-print("RAG Engine initialized.")
 
-@app.route('/api/status', methods=['GET'])
-def health_check():
-    return jsonify({"status": "healthy", "message": "Medical Fact-Checker API is running."})
+# Auth Routes
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({"error": "User already exists"}), 400
+    
+    new_user = User(
+        username=data['username'],
+        password_hash=generate_password_hash(data['password'], method='pbkdf2:sha256')
+    )
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({"message": "User registered successfully"}), 201
 
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    user = User.query.filter_by(username=data['username']).first()
+    if user and check_password_hash(user.password_hash, data['password']):
+        access_token = create_access_token(identity=str(user.id))
+        return jsonify(access_token=access_token, username=user.username), 200
+    return jsonify({"error": "Invalid credentials"}), 401
+
+# Feature Routes
 @app.route('/api/upload-document', methods=['POST'])
 def upload_document():
     if 'file' not in request.files:
@@ -34,35 +89,135 @@ def upload_document():
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        
-        try:
-            chunks_processed = rag_engine.process_document(filepath)
-            return jsonify({
-                "message": "Document successfully vectorized and added to the medical knowledge base.",
-                "chunks_added": chunks_processed,
-                "filename": filename
-            })
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-    else:
-        return jsonify({"error": "Only PDF files are supported."}), 400
+        chunks_processed = rag_engine.process_document(filepath)
+        return jsonify({"message": "Document indexed", "chunks": chunks_processed, "filename": filename})
+    return jsonify({"error": "Only PDFs allowed"}), 400
 
 @app.route('/api/fact-check', methods=['POST'])
 def fact_check():
     data = request.get_json()
-    if not data or 'claim' not in data:
-        return jsonify({"error": "Missing 'claim' in request body"}), 400
+    claim = data.get('claim')
+    user_id = None
     
-    claim = data['claim']
+    # Optional auth for history
+    auth_header = request.headers.get('Authorization')
+    if auth_header:
+        try:
+            from flask_jwt_extended import decode_token
+            token = auth_header.split(" ")[1]
+            decoded = decode_token(token)
+            user_id = decoded.get('sub')
+        except Exception:
+            pass
+
+    result = rag_engine.verify_claim(claim)
+    
+    if "error" not in result:
+        # Save to history
+        history_entry = FactCheckHistory(
+            user_id=user_id,
+            claim=claim,
+            verdict=result.get('status'),
+            confidence=result.get('confidence'),
+            explanation=result.get('explanation')
+        )
+        db.session.add(history_entry)
+        db.session.commit()
+        result['id'] = history_entry.id
+
+    return jsonify(result)
+
+@app.route('/api/analyze-image', methods=['POST'])
+def analyze_image():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+    
+    image = request.files['image']
+    query = request.form.get('query', 'Analyze this medical report.')
+    
+    filename = secure_filename(f"{uuid.uuid4()}_{image.filename}")
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    image.save(filepath)
+    
+    result = rag_engine.analyze_medical_image(filepath, query)
+    return jsonify(result)
+
+@app.route('/api/batch-check', methods=['POST'])
+def batch_check():
+    data = request.get_json()
+    claims = data.get('claims', [])
+    if not claims:
+        return jsonify({"error": "No claims provided"}), 400
+    
+    results = rag_engine.batch_verify(claims)
+    return jsonify({"results": results})
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    total_checks = FactCheckHistory.query.count()
+    true_count = FactCheckHistory.query.filter_by(verdict='TRUE').count()
+    false_count = FactCheckHistory.query.filter_by(verdict='FALSE').count()
+    unverified_count = FactCheckHistory.query.filter_by(verdict='UNVERIFIED').count()
+    from sqlalchemy.sql import func
+    avg_conf_result = db.session.query(func.avg(FactCheckHistory.confidence).label('average')).first()
+    avg_conf = round(avg_conf_result.average, 1) if avg_conf_result.average is not None else 0
+    kb_stats = rag_engine.get_kb_stats()
+    
+    return jsonify({
+        "total_checks": total_checks,
+        "true_count": true_count,
+        "false_count": false_count,
+        "unverified_count": unverified_count,
+        "avg_confidence": avg_conf,
+        "kb_size": kb_stats.get('total_chunks', 0)
+    })
+
+@app.route('/api/kb-status', methods=['GET'])
+def kb_status():
+    return jsonify(rag_engine.get_kb_stats())
+
+@app.route('/api/history', methods=['GET'])
+def get_history():
+    from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
     try:
-        result = rag_engine.verify_claim(claim)
-        # Check if the result has an error (like missing API key)
-        if "error" in result:
-            return jsonify(result), 500
-            
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        verify_jwt_in_request()
+        user_id = get_jwt_identity()
+    except Exception:
+        return jsonify([]), 200
+
+    history = FactCheckHistory.query.filter_by(user_id=user_id).order_by(FactCheckHistory.timestamp.desc()).limit(10).all()
+    return jsonify([{
+        "id": h.id,
+        "claim": h.claim,
+        "verdict": h.verdict,
+        "confidence": h.confidence,
+        "timestamp": h.timestamp.isoformat()
+    } for h in history])
+
+@app.route('/api/download-report/<int:check_id>', methods=['GET'])
+def download_report(check_id):
+    entry = FactCheckHistory.query.get_or_404(check_id)
+    
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt="Medical Fact-Check Report", ln=True, align='C')
+    
+    pdf.set_font("Arial", size=12)
+    pdf.ln(10)
+    pdf.cell(200, 10, txt=f"Claim: {entry.claim}", ln=True)
+    pdf.cell(200, 10, txt=f"Verdict: {entry.verdict}", ln=True)
+    pdf.cell(200, 10, txt=f"Confidence: {entry.confidence}%", ln=True)
+    pdf.ln(5)
+    pdf.multi_cell(0, 10, txt=f"Explanation: {entry.explanation}")
+    pdf.ln(5)
+    pdf.cell(200, 10, txt=f"Generated on: {entry.timestamp}", ln=True)
+    
+    report_filename = f"report_{check_id}.pdf"
+    report_path = os.path.join(app.config['REPORT_FOLDER'], report_filename)
+    pdf.output(report_path)
+    
+    return send_file(report_path, as_attachment=True)
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)

@@ -3,53 +3,84 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --medical-primary: 20 184 166; /* teal-500 */
+    --medical-glow: 20 184 166 / 0.3;
+  }
+  
   body {
-    @apply bg-slate-900 text-slate-100 antialiased min-h-screen relative overflow-x-hidden;
+    @apply bg-slate-950 text-slate-100 antialiased min-h-screen relative overflow-x-hidden;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  }
+  
+  .glass-card {
+    @apply bg-slate-900/40 backdrop-blur-lg border border-white/10 rounded-3xl p-6 transition-all duration-300;
+  }
+  
+  .glass-card:hover {
+    @apply border-white/20 bg-slate-900/60 -translate-y-1;
+    box-shadow: 0 0 40px rgba(20, 184, 166, 0.1);
+  }
+
+  .medical-gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-teal-300 via-emerald-400 to-blue-500;
+  }
+
+  .btn-primary {
+    @apply px-8 py-4 bg-gradient-to-r from-teal-600 to-emerald-500 hover:from-teal-500 hover:to-emerald-400 rounded-full font-bold shadow-lg text-white transition-all transform hover:scale-[1.02] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2;
   }
 }
 
 @layer utilities {
-  .glass-panel {
-    @apply bg-white/5 backdrop-blur-md border border-white/10 shadow-xl shadow-black/20;
+  .animate-blob {
+    animation: blob-bounce 7s infinite;
   }
-  
-  .glass-panel-medical {
-    @apply bg-medical-900/40 backdrop-blur-md border border-medical-500/20 shadow-xl shadow-black/20;
+  .animation-delay-2000 {
+    animation-delay: 2s;
   }
+  .animation-delay-4000 {
+    animation-delay: 4s;
+  }
+}
+
+@keyframes blob-bounce {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+
+.bg-blob {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(var(--medical-primary), 0.15) 0%, rgba(0, 0, 0, 0) 70%);
+  filter: blur(60px);
+  z-index: -1;
+  border-radius: 50%;
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-slate-900;
+  @apply bg-slate-950;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-700 rounded-full;
+  @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-600;
-}
-
-/* Blob Animations */
-.bg-blob {
-  position: absolute;
-  filter: blur(80px);
-  z-index: -1;
-  border-radius: 50%;
-  animation: float 20s infinite ease-in-out;
-}
-
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0) scale(1);
-  }
-  50% {
-    transform: translateY(-50px) scale(1.1);
-  }
+/* Truth Meter Glow */
+.truth-meter-glow {
+  filter: drop-shadow(0 0 10px rgba(20, 184, 166, 0.5));
 }
