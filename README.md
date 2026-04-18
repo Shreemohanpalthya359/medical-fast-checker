@@ -61,6 +61,14 @@ We specifically engineered the stack to prioritize maximum throughput, zero-late
 ## 🏛️ System Architecture
 
 <div align="center">
+  <img src="./assets/workflow_3d_animation.webp" alt="3D Animated Workflow" style="width: 100%; max-width: 800px; border-radius: 12px; box-shadow: 0px 4px 15px rgba(0, 255, 255, 0.3);" />
+  <br/>
+  <p><i>Live 3D Architecture & Data Flow Visualization</i></p>
+</div>
+
+<br/>
+
+<div align="center">
   <img src="./assets/architecture_3d.png" alt="3D Architecture Diagram" style="width: 100%; max-width: 800px; border-radius: 12px; box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.2);" />
 </div>
 <br/>
