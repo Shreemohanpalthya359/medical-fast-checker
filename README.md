@@ -1,0 +1,1 @@
+# medical-fast-checker

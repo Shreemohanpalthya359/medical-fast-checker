@@ -1,0 +1,15 @@
+# Medical Fact Checker - Root Gitignore
+.DS_Store
+
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/.env
+backend/uploads/*
+backend/chroma_db/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
