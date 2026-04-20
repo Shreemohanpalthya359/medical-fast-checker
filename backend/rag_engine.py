@@ -177,18 +177,43 @@ Output RAW JSON ONLY. No markdown. No code fences.
             return f"PubMed Search Error: {str(e)}"
 
     def analyze_medical_image(self, file_path, user_query=None):
-        """Analyzes medical images (Gemini) or PDF reports (Groq Llama 3.1)."""
+        """Analyzes medical images or PDF reports using Groq models."""
+        user_q = user_query.strip() if user_query else None
+
+        # Build a query-aware prompt that directly answers what the user asked
+        if user_q:
+            query_instruction = f"""
+            The user specifically asked: "{user_q}"
+            Make sure your 'analysis' field DIRECTLY and FULLY answers this question using the report data.
+            If the user asked for food recommendations, list specific foods.
+            If the user asked for remedies/medications, list them with dosages if available.
+            If the user asked for lifestyle advice, provide detailed actionable steps.
+            """
+        else:
+            query_instruction = "Provide a comprehensive general analysis of the findings."
+
         prompt = f"""
-        Analyze this medical document/image.
-        1. Identify the type of document.
-        2. Detect any abnormal values, symptoms, or findings.
-        3. List specific PRECAUTIONS or next steps.
-        4. Answer this query: {user_query if user_query else 'General analysis'}.
-        5. Return ONLY RAW JSON with keys: 'analysis', 'symptoms_detected', 'precautions', 'confidence', 'glossary'.
+        You are an expert clinical AI assistant. Analyze the medical document provided.
+
+        Your tasks:
+        1. Identify the document type (e.g., Lab Report, Radiology, Consultation Note).
+        2. Extract ALL abnormal values, symptoms, and clinical findings.
+        3. {query_instruction}
+        4. List actionable PRECAUTIONS and recommended next steps.
+        5. Provide a confidence score (integer 0-100) reflecting how certain you are.
+
+        Respond ONLY with a valid JSON object using EXACTLY these keys:
+        {{
+          "analysis": "<direct, detailed answer to the user query based on the report>",
+          "symptoms_detected": ["<symptom 1>", "<symptom 2>"],
+          "precautions": ["<step 1>", "<step 2>"],
+          "confidence": <integer 0-100>,
+          "glossary": {{"<medical_term>": "<plain English meaning>"}}
+        }}
         """
-        
+
         ext = os.path.splitext(file_path)[1].lower()
-        
+
         # Branch 1: PDF Report Analysis (Uses Groq Text Model)
         if ext == '.pdf':
             if not self.llm:
@@ -197,36 +222,52 @@ Output RAW JSON ONLY. No markdown. No code fences.
                 from langchain_community.document_loaders import PyPDFLoader
                 loader = PyPDFLoader(file_path)
                 docs = loader.load()
-                report_text = "\n".join([d.page_content for d in docs])[:6000] # Limit context size
-                
-                chain = self.fact_check_prompt.copy() # fallback template logic
+                report_text = "\n".join([d.page_content for d in docs])[:6000]
+
                 from langchain.prompts import PromptTemplate
-                
                 pdf_prompt = PromptTemplate(
-                    template="You are a clinical AI. Analyze this medical report text:\n{text}\n\n{instructions}",
+                    template="""You are a clinical AI assistant. Here is a medical report:
+
+{text}
+
+{instructions}""",
                     input_variables=["text", "instructions"]
                 )
-                
+
                 pdf_chain = pdf_prompt | self.llm
                 response = pdf_chain.invoke({"text": report_text, "instructions": prompt})
                 content = response.content.strip()
-                
+                print(f"PDF LLM raw response (first 400 chars): {content[:400]}")
+
+                # Robust JSON extraction
                 if "```json" in content:
                     content = content.split("```json")[-1].split("```")[0].strip()
                 elif "```" in content:
-                    content = content.split("```")[-1].split("```")[0].strip()
+                    parts = content.split("```")
+                    for part in parts:
+                        if part.strip().startswith("{"):
+                            content = part.strip()
+                            break
                 if "{" in content and "}" in content:
                     content = content[content.find("{"):content.rfind("}") + 1]
-                    
-                import json
+
                 res = json.loads(content)
+
+                # Normalize confidence: if 0-1 float, convert to 0-100 int
+                raw_conf = res.get('confidence', 75)
+                if isinstance(raw_conf, float) and raw_conf <= 1.0:
+                    res['confidence'] = int(raw_conf * 100)
+                else:
+                    res['confidence'] = int(raw_conf)
+
+                # Flatten nested analysis dict if needed
                 if isinstance(res.get('analysis'), dict):
-                    # Flatten it to a string if the LLM nested it
                     flat_analysis = []
                     for k, v in res['analysis'].items():
-                        if isinstance(v, list): v = ", ".join(v)
+                        if isinstance(v, list): v = ", ".join(str(i) for i in v)
                         flat_analysis.append(f"{k.replace('_', ' ').title()}: {v}")
                     res['analysis'] = "\n".join(flat_analysis)
+
                 return res
             except Exception as e:
                 raw = locals().get('content', '')
@@ -240,50 +281,100 @@ Output RAW JSON ONLY. No markdown. No code fences.
             from langchain_core.messages import HumanMessage
             from langchain_groq import ChatGroq
             import base64
-            
+
             with open(file_path, "rb") as f:
-                base64_image = base64.b64encode(f.read()).decode('utf-8')
-            
-            vision_llm = ChatGroq(temperature=0, model_name="meta-llama/llama-4-scout-17b-16e-instruct")
+                raw_bytes = f.read()
+            base64_image = base64.b64encode(raw_bytes).decode('utf-8')
+
+            # Detect correct MIME type from file extension
+            mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                        '.gif': 'image/gif', '.webp': 'image/webp'}
+            mime_type = mime_map.get(ext, 'image/jpeg')
+
+            api_key = os.getenv("GROQ_API_KEY")
+            vision_llm = ChatGroq(
+                temperature=0,
+                model_name="meta-llama/llama-4-scout-17b-16e-instruct",
+                api_key=api_key
+            )
             message = HumanMessage(content=[
-                {"type": "text", "text": prompt + "\nRespond with ONLY the JSON object. Do not include introductory text."},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+                {"type": "text", "text": prompt + "\nRespond with ONLY a valid JSON object. No markdown, no explanations, no code fences."},
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}},
             ])
             response = vision_llm.invoke([message])
             content = response.content.strip()
-            
-            import re
-            if "```json" in content:
-                content = content.split("```json")[-1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[-1].split("```")[0].strip()
-            if "{" in content and "}" in content:
-                content = content[content.find("{"):content.rfind("}") + 1]
-                
-            import json
-            res = json.loads(content)
+            raw_content = content  # Keep original for fallback
+
+            print(f"Vision LLM raw response (first 300 chars): {content[:300]}")
+
+            # Robust JSON extraction
+            def extract_json(text):
+                """Try multiple strategies to extract a JSON object from text."""
+                if not text:
+                    return None
+                # Strategy 1: ```json ... ``` fence
+                if "```json" in text:
+                    text = text.split("```json")[-1].split("```")[0].strip()
+                # Strategy 2: plain ``` fence
+                elif "```" in text:
+                    parts = text.split("```")
+                    # Find the part that looks like JSON
+                    for part in parts:
+                        part = part.strip()
+                        if part.startswith("{"):
+                            text = part
+                            break
+                # Strategy 3: extract from first { to last }
+                if "{" in text and "}" in text:
+                    text = text[text.find("{"):text.rfind("}") + 1]
+                try:
+                    return json.loads(text)
+                except (json.JSONDecodeError, ValueError):
+                    return None
+
+            res = extract_json(content)
+
+            if res is None:
+                # JSON parsing failed — return the raw LLM text as a
+                # human-readable analysis instead of an error
+                print("Vision model returned non-JSON response — using raw text as analysis.")
+                return {
+                    "analysis": raw_content if raw_content else "The vision model returned an empty response. Please try again.",
+                    "confidence": 50,
+                    "symptoms_detected": [],
+                    "precautions": ["Consult a medical professional for a formal analysis."],
+                    "glossary": {}
+                }
+
+            # Flatten nested analysis dict if model returned one
             if isinstance(res.get('analysis'), dict):
                 flat_analysis = []
                 for k, v in res['analysis'].items():
-                    if isinstance(v, list): v = ", ".join(v)
+                    if isinstance(v, list): v = ", ".join(str(i) for i in v)
                     flat_analysis.append(f"{k.replace('_', ' ').title()}: {v}")
                 res['analysis'] = "\n".join(flat_analysis)
+
+            # Normalize confidence: if 0-1 float, convert to 0-100 int
+            raw_conf = res.get('confidence', 75)
+            if isinstance(raw_conf, float) and raw_conf <= 1.0:
+                res['confidence'] = int(raw_conf * 100)
+            else:
+                res['confidence'] = int(raw_conf)
+
             return res
+
         except Exception as e:
-            raw = locals().get('content', '')
             err_str = str(e)
             print(f"Groq Vision Error: {err_str}")
-            
-            if "429" in err_str or "Quota" in err_str:
-                return {"analysis": "⚠️ Groq API Quota Exceeded.\nPlease check your usage limits on the Groq Console.", "confidence": 0, "symptoms_detected": [], "precautions": [], "glossary": {}}
-                
-            if raw and "{" in raw:
-                try: 
-                    import json 
-                    return json.loads(raw)
-                except: pass
+
+            if "429" in err_str or "rate_limit" in err_str.lower():
+                return {"analysis": "⚠️ Groq API Rate Limit reached.\nPlease wait a moment and try again.", "confidence": 0, "symptoms_detected": [], "precautions": [], "glossary": {}}
+
+            if "invalid_api_key" in err_str.lower() or "authentication" in err_str.lower():
+                return {"analysis": "⚠️ Invalid Groq API Key. Please check your .env file.", "confidence": 0, "symptoms_detected": [], "precautions": [], "glossary": {}}
+
             return {
-                "analysis": raw if raw else f"The model could not analyze the image. System Error: {err_str[:200]}...",
+                "analysis": f"Image analysis failed. Please ensure the image is a valid medical scan (JPG/PNG) and try again.\n\nTechnical detail: {err_str[:300]}",
                 "confidence": 0,
                 "symptoms_detected": [],
                 "precautions": [],
@@ -355,6 +446,10 @@ Output RAW JSON ONLY. No markdown. No code fences.
             content = response.content.strip()
             if "```json" in content:
                 content = content.split("```json")[-1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].strip()
+            if "{" in content and "}" in content:
+                content = content[content.find("{"):content.rfind("}") + 1]
             result = json.loads(content)
 
             # Enrich with pipeline metadata

@@ -196,27 +196,30 @@ def get_history():
 
 @app.route('/api/download-report/<int:check_id>', methods=['GET'])
 def download_report(check_id):
-    entry = FactCheckHistory.query.get_or_404(check_id)
-    
+    entry = db.session.get(FactCheckHistory, check_id)
+    if entry is None:
+        return jsonify({"error": "Report not found"}), 404
+
+    from fpdf import FPDF, XPos, YPos
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, txt="Medical Fact-Check Report", ln=True, align='C')
-    
-    pdf.set_font("Arial", size=12)
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(200, 10, text="Medical Fact-Check Report", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+
+    pdf.set_font("Helvetica", size=12)
     pdf.ln(10)
-    pdf.cell(200, 10, txt=f"Claim: {entry.claim}", ln=True)
-    pdf.cell(200, 10, txt=f"Verdict: {entry.verdict}", ln=True)
-    pdf.cell(200, 10, txt=f"Confidence: {entry.confidence}%", ln=True)
+    pdf.cell(200, 10, text=f"Claim: {entry.claim}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(200, 10, text=f"Verdict: {entry.verdict}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(200, 10, text=f"Confidence: {entry.confidence}%", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(5)
-    pdf.multi_cell(0, 10, txt=f"Explanation: {entry.explanation}")
+    pdf.multi_cell(0, 10, text=f"Explanation: {entry.explanation or 'N/A'}")
     pdf.ln(5)
-    pdf.cell(200, 10, txt=f"Generated on: {entry.timestamp}", ln=True)
-    
+    pdf.cell(200, 10, text=f"Generated on: {entry.timestamp}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
     report_filename = f"report_{check_id}.pdf"
     report_path = os.path.join(app.config['REPORT_FOLDER'], report_filename)
     pdf.output(report_path)
-    
+
     return send_file(report_path, as_attachment=True)
 
 if __name__ == '__main__':
