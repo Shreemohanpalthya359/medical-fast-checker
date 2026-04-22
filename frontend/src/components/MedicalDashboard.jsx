@@ -233,6 +233,7 @@ const MedicalDashboard = () => {
             initial={{ x: -300, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: -300, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
             className="w-80 glass-panel border-r border-white/5 h-full z-50 flex flex-col absolute md:relative"
           >
             <div className="p-6 border-b border-white/5 flex items-center justify-between">
@@ -306,7 +307,7 @@ const MedicalDashboard = () => {
           
           {/* TAB: SINGLE CHECK */}
           {activeTab === 'single' && (
-            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} className="space-y-8">
+            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{ duration: 0.4, ease: "easeOut" }} className="space-y-8">
               <div className="space-y-6">
                 <div className="flex gap-4">
                   <button onClick={() => setActiveAnalysisType('text')} className={`px-6 py-2 rounded-full text-sm font-bold transition-all ${activeAnalysisType === 'text' ? 'bg-teal-500 text-white shadow-lg' : 'glass-panel text-slate-400'}`}>Text</button>
@@ -334,7 +335,7 @@ const MedicalDashboard = () => {
 
               <AnimatePresence mode="wait">
                 {result && !loading && (
-                  <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="grid lg:grid-cols-3 gap-8">
+                  <motion.div initial={{opacity:0, scale: 0.95, y: 15}} animate={{opacity:1, scale: 1, y: 0}} exit={{opacity:0, scale: 0.95}} transition={{ type: "spring", stiffness: 250, damping: 25 }} className="grid lg:grid-cols-3 gap-8">
                     <div className={`col-span-2 glass-panel p-10 rounded-[3rem] border-t-2 ${result.status === 'TRUE' ? 'border-teal-500 bg-teal-950/20' : result.status === 'FALSE' ? 'border-rose-500 bg-rose-950/20' : 'border-amber-500 bg-amber-950/20'}`}>
                       <div className="flex gap-8">
                         <div className="text-center">
@@ -391,7 +392,7 @@ const MedicalDashboard = () => {
 
           {/* TAB: BATCH CHECK */}
           {activeTab === 'batch' && (
-             <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} className="space-y-8">
+             <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{ duration: 0.4, ease: "easeOut" }} className="space-y-8">
                <div className="glass-panel p-8 rounded-3xl">
                  <h2 className="text-xl font-bold flex items-center gap-3 mb-6"><Layers className="text-teal-400 w-6 h-6"/> Batch Processing</h2>
                  <p className="text-slate-400 text-sm mb-4">Paste multiple medical claims (one per line) to verify them automatically.</p>
@@ -440,7 +441,7 @@ const MedicalDashboard = () => {
 
           {/* TAB: KNOWLEDGE BASE */}
           {activeTab === 'kb' && (
-            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} className="space-y-8">
+            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{ duration: 0.4, ease: "easeOut" }} className="space-y-8">
               <div className="grid md:grid-cols-3 gap-6">
                 <div className="glass-panel p-6 rounded-3xl text-center">
                   <Database className="w-10 h-10 text-teal-400 mx-auto mb-4" />
@@ -482,7 +483,7 @@ const MedicalDashboard = () => {
 
           {/* TAB: ANALYTICS */}
           {activeTab === 'analytics' && (
-            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} className="space-y-8">
+            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{ duration: 0.4, ease: "easeOut" }} className="space-y-8">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="glass-panel p-6 rounded-3xl">
                    <div className="text-3xl font-black">{stats?.total_checks || 0}</div>

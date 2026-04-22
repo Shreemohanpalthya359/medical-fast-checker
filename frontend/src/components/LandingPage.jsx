@@ -132,7 +132,7 @@ const LandingPage = ({ onGetStarted }) => {
 
           {/* headline */}
           <motion.h1
-            initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+            initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, type: "spring", stiffness: 100 }}
             className="text-5xl sm:text-6xl md:text-8xl font-black tracking-tighter leading-[1.0] mb-6"
             style={{ fontFamily: 'Syne, sans-serif' }}
           >
@@ -154,10 +154,10 @@ const LandingPage = ({ onGetStarted }) => {
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
             className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20"
           >
-            <button onClick={onGetStarted} className="btn-primary text-base px-8 py-4 rounded-2xl">
+            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={onGetStarted} className="btn-primary text-base px-8 py-4 rounded-2xl">
               Start Fact-Checking Free
               <ArrowRight className="w-5 h-5" />
-            </button>
+            </motion.button>
             <a href="#features" className="btn-ghost">
               <ChevronDown className="w-4 h-4" />
               See how it works
@@ -292,7 +292,8 @@ const LandingPage = ({ onGetStarted }) => {
                 <motion.div
                   key={i}
                   initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }} transition={{ delay: i * 0.08 }}
+                  whileHover={{ y: -5, scale: 1.02 }}
+                  viewport={{ once: true }} transition={{ delay: i * 0.08, type: "spring", stiffness: 100 }}
                   className="bento-card group"
                 >
                   <div className={`inline-flex items-center gap-2 mb-6 px-3 py-1.5 rounded-xl text-xs font-bold ${c.bg} ${c.border} ${c.text} border`}>
@@ -341,7 +342,8 @@ const LandingPage = ({ onGetStarted }) => {
               <motion.div
                 key={i}
                 initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }} transition={{ delay: i * 0.15 }}
+                whileHover={{ scale: 1.03 }}
+                viewport={{ once: true }} transition={{ delay: i * 0.15, type: "spring", stiffness: 120 }}
                 className="bento-card text-center relative"
               >
                 <div className="text-6xl font-black text-white/5 absolute top-4 right-5 select-none" style={{ fontFamily: 'Syne, sans-serif' }}>{s.step}</div>
@@ -399,10 +401,10 @@ const LandingPage = ({ onGetStarted }) => {
             <p className="text-slate-400 mb-10 font-medium">
               No credit card required. Powered by open-source AI. Start in seconds.
             </p>
-            <button onClick={onGetStarted} className="btn-primary text-base px-10 py-4 rounded-2xl">
+            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={onGetStarted} className="btn-primary text-base px-10 py-4 rounded-2xl">
               Launch Aegis AI Now
               <ArrowRight className="w-5 h-5" />
-            </button>
+            </motion.button>
           </div>
         </motion.div>
       </section>
