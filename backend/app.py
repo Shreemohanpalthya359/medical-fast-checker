@@ -284,6 +284,8 @@ def submit_feedback(check_id):
 def health_feed():
     """WHO/CDC live feed — returns latest public health advisories via RSS."""
     import feedparser
+    import socket
+    socket.setdefaulttimeout(5)   # 5 s cap per feed so we don't hang
     feeds = [
         ("CDC", "https://tools.cdc.gov/api/v2/resources/media/316422.rss"),
         ("WHO", "https://www.who.int/rss-feeds/news-releases.xml"),
