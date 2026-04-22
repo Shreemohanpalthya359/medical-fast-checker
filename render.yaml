@@ -3,9 +3,7 @@ services:
     name: aegis-medical-backend
     runtime: python
     rootDir: backend
-    buildCommand: >
-      pip install -r requirements.txt &&
-      python -c "from langchain_huggingface import HuggingFaceEmbeddings; HuggingFaceEmbeddings(model_name='all-MiniLM-L6-v2')"
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     envVars:
       - key: GROQ_API_KEY
