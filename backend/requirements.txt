@@ -5,11 +5,10 @@ langchain
 langchain-core
 langchain-text-splitters
 langchain-groq
-langchain-huggingface
 langchain-community
 langchain-chroma
 chromadb
-sentence-transformers
+fastembed
 pypdf
 werkzeug
 flask-sqlalchemy

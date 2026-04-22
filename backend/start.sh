@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-echo "==> Pre-caching HuggingFace embedding model (all-MiniLM-L6-v2)..."
+echo "==> Pre-caching FastEmbed ONNX model (BAAI/bge-small-en-v1.5)..."
 python -c "
-from langchain_huggingface import HuggingFaceEmbeddings
-HuggingFaceEmbeddings(model_name='all-MiniLM-L6-v2')
+from langchain_community.embeddings import FastEmbedEmbeddings
+FastEmbedEmbeddings(model_name='BAAI/bge-small-en-v1.5')
 print('Model cached successfully.')
 "
 

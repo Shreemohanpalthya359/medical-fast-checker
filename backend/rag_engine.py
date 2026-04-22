@@ -5,7 +5,7 @@ import base64
 import time
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.prompts import PromptTemplate
@@ -59,8 +59,8 @@ class MedicalRAGEngine:
         self.persist_directory = persist_directory
         self.model_name = "llama-3.1-8b-instant"
 
-        # Sentence-transformers for local, fast clinical text embeddings
-        self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        # FastEmbed: ONNX-optimized embeddings, ~90MB RAM (vs ~400MB for sentence-transformers)
+        self.embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
         self.init_vectorstore()
 
         # Seed KB if empty
