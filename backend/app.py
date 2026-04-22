@@ -39,9 +39,19 @@ class FactCheckHistory(db.Model):
     explanation = db.Column(db.Text)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     report_path = db.Column(db.String(255))
+    feedback = db.Column(db.String(10), nullable=True)  # 'up' or 'down'
 
 with app.app_context():
     db.create_all()
+    # Auto-migrate: add feedback column if it doesn't exist (handles old DBs)
+    with db.engine.connect() as conn:
+        from sqlalchemy import text, inspect
+        inspector = inspect(db.engine)
+        existing_cols = [c['name'] for c in inspector.get_columns('fact_check_history')]
+        if 'feedback' not in existing_cols:
+            conn.execute(text("ALTER TABLE fact_check_history ADD COLUMN feedback VARCHAR(10)"))
+            conn.commit()
+            print("Migration: added 'feedback' column to fact_check_history.")
 
 UPLOAD_FOLDER = './uploads'
 REPORT_FOLDER = './reports'
@@ -89,7 +99,8 @@ def upload_document():
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        chunks_processed = rag_engine.process_document(filepath)
+        # Pass user_id so uploaded chunks are tagged to this user's Personal KB
+        chunks_processed = rag_engine.process_document(filepath, user_id=user_id)
         return jsonify({"message": "Document indexed", "chunks": chunks_processed, "filename": filename})
     return jsonify({"error": "Only PDFs allowed"}), 400
 
@@ -110,7 +121,7 @@ def fact_check():
         except Exception:
             pass
 
-    result = rag_engine.verify_claim(claim)
+    result = rag_engine.verify_claim(claim, user_id=user_id)
     
     if "error" not in result:
         # Save to history
@@ -221,6 +232,46 @@ def download_report(check_id):
     pdf.output(report_path)
 
     return send_file(report_path, as_attachment=True)
+
+@app.route('/api/feedback/<int:check_id>', methods=['POST'])
+def submit_feedback(check_id):
+    """Store user thumbs-up / thumbs-down for a fact-check result."""
+    data = request.get_json()
+    rating = data.get('rating')  # 'up' or 'down'
+    if rating not in ('up', 'down'):
+        return jsonify({"error": "rating must be 'up' or 'down'"}), 400
+
+    entry = db.session.get(FactCheckHistory, check_id)
+    if entry is None:
+        return jsonify({"error": "Entry not found"}), 404
+
+    entry.feedback = rating
+    db.session.commit()
+    return jsonify({"message": f"Feedback '{rating}' recorded for entry {check_id}."})
+
+@app.route('/api/health-feed', methods=['GET'])
+def health_feed():
+    """WHO/CDC Live Feed – returns latest public health advisories via RSS."""
+    import feedparser, time as _time
+    feeds = [
+        ("CDC",  "https://tools.cdc.gov/api/v2/resources/media/316422.rss"),
+        ("WHO",  "https://www.who.int/rss-feeds/news-releases.xml"),
+    ]
+    articles = []
+    for source, url in feeds:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:4]:
+                articles.append({
+                    "source":    source,
+                    "title":     entry.get("title", ""),
+                    "link":      entry.get("link",  ""),
+                    "published": entry.get("published", ""),
+                    "summary":   entry.get("summary", "")[:200]
+                })
+        except Exception as e:
+            print(f"Feed error ({source}): {e}")
+    return jsonify({"articles": articles[:8]})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

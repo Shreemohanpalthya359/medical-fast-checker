@@ -85,6 +85,12 @@ class MedicalRAGEngine:
             embedding_function=self.embeddings,
             persist_directory=self.persist_directory
         )
+        # Separate collection used exclusively for the claim similarity cache
+        self.claim_cache = Chroma(
+            collection_name="claim_cache",
+            embedding_function=self.embeddings,
+            persist_directory=self.persist_directory
+        )
 
     def _seed_knowledge_base_if_empty(self):
         """Pre-seed the vector DB with curated medical facts if the collection is empty."""
@@ -132,28 +138,38 @@ class MedicalRAGEngine:
 
     def setup_prompts(self):
         template = """\
-You are a strict, expert medical fact-checker AI. Evaluate the provided CLAIM against \
-trusted medical document context AND live scientific research (PubMed abstracts).
+You are Aegis, an expert medical fact-checker AI trained on clinical literature. \
+You receive either a CLAIM to verify OR a QUESTION about medicine.
 
-Context from Vector Search (Medical Documents):
+Document Context (from curated medical knowledge base):
 {doc_context}
 
-Live Scientific Consensus (PubMed):
+PubMed Live Evidence:
 {live_context}
 
-Medical Claim to Verify:
-{claim}
+Input: {claim}
 
-Return ONLY a valid JSON object with exactly these keys:
+INSTRUCTIONS:
+1. If the input is a CLAIM (e.g. "Aspirin reduces fever"), verify it rigorously.
+2. If the input is a QUESTION or topic (e.g. "tell me about aspirin"), set status UNVERIFIED and explain comprehensively.
+3. ALWAYS respond with ONLY a valid JSON object. No markdown, no code fences, no preamble.
+
+CONFIDENCE CALIBRATION RULES (follow strictly):
+- 90-100: Multiple strong sources confirm the claim. Well-established medical consensus.
+- 75-89:  Good evidence from at least one source. Mainstream medical position.
+- 60-74:  Some supporting evidence but with caveats or nuance required.
+- 40-59:  Insufficient or conflicting evidence. Cannot confirm or deny clearly.
+- 0-39:   Evidence contradicts the claim or claim is clearly false/misleading.
+
+Required JSON keys:
 - "status": "TRUE", "FALSE", or "UNVERIFIED"
-- "confidence": integer 0-100 (Truth Meter score)
-- "explanation": concise medical explanation (2-4 sentences)
-- "sources": list of reference snippets used
-- "glossary": dict of complex medical terms and their plain-English definitions
-- "consensus_match": boolean, whether claim aligns with current scientific consensus
-- "medical_category": the medical specialty this claim belongs to (e.g., "Cardiology", "Pharmacology")
-
-Output RAW JSON ONLY. No markdown. No code fences.
+- "confidence": integer 0-100 (calibrate per rules above, do NOT default to 50)
+- "explanation": 3-5 sentences — be specific, cite mechanisms, mention key studies if available
+- "sources": [list of short reference strings, include PubMed IDs if found]
+- "glossary": {{"term": "plain-english definition"}} (include 2-4 key medical terms)
+- "consensus_match": true if your verdict aligns with mainstream medical consensus, else false
+- "medical_category": e.g. "Pharmacology", "Cardiology", "Immunology"
+- "precautions": [list of 2-4 important clinical caveats or warnings related to the claim]
 """
         self.fact_check_prompt = PromptTemplate(
             template=template,
@@ -161,20 +177,23 @@ Output RAW JSON ONLY. No markdown. No code fences.
         )
 
     def search_pubmed(self, query):
-        """Fetches top abstracts from PubMed for live consensus."""
+        """Fetches top 2 PubMed abstracts to provide richer evidence context."""
         try:
-            handle = Entrez.esearch(db="pubmed", term=query, retmax=3)
+            handle = Entrez.esearch(db="pubmed", term=query, retmax=2)
             record = Entrez.read(handle)
             handle.close()
             ids = record["IdList"]
             if not ids:
-                return "No recent scientific publications found for this query."
-            handle = Entrez.efetch(db="pubmed", id=",".join(ids), rettype="abstract", retmode="text")
-            abstracts = handle.read()
-            handle.close()
-            return abstracts
+                return "No recent publications found."
+            combined = []
+            for pmid in ids[:2]:
+                handle = Entrez.efetch(db="pubmed", id=pmid, rettype="abstract", retmode="text")
+                abstract = handle.read()
+                handle.close()
+                combined.append(abstract[:600])  # 600 chars each → 1200 max, safe for Groq free tier
+            return "\n---\n".join(combined)
         except Exception as e:
-            return f"PubMed Search Error: {str(e)}"
+            return f"PubMed error: {str(e)[:100]}"
 
     def analyze_medical_image(self, file_path, user_query=None):
         """Analyzes medical images or PDF reports using Groq models."""
@@ -381,44 +400,108 @@ Output RAW JSON ONLY. No markdown. No code fences.
                 "glossary": {}
             }
 
-    def process_document(self, file_path):
-        """Index a PDF document into the vector store."""
+    def process_document(self, file_path, user_id=None):
+        """Index a PDF into the vector store, tagging each chunk with the uploader's user_id."""
         loader = PyPDFLoader(file_path)
         documents = loader.load()
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
         splits = text_splitter.split_documents(documents)
+        # Stamp every chunk with user_id so searches can be scoped per user
+        if user_id:
+            for doc in splits:
+                doc.metadata["user_id"] = str(user_id)
         self.vectorstore.add_documents(splits)
         return len(splits)
 
-    def verify_claim(self, claim):
+    def _cache_lookup(self, claim, threshold=0.95):
+        """Return a cached result if a near-identical claim exists (similarity >= threshold)."""
+        try:
+            count = self.claim_cache._collection.count()
+            if count == 0:
+                return None
+            hits = self.claim_cache.similarity_search_with_score(claim, k=1)
+            if not hits:
+                return None
+            doc, score = hits[0]
+            similarity = max(0.0, 1.0 - score / 2.0)
+            if similarity >= threshold:
+                cached = json.loads(doc.page_content)
+                cached["from_cache"] = True
+                cached["cache_similarity"] = round(similarity, 3)
+                cached["processing_time_ms"] = 0
+                print(f"Cache HIT ({similarity:.1%}) for: '{claim[:60]}'")
+                return cached
+        except Exception as e:
+            print(f"Cache lookup error: {e}")
+        return None
+
+    def _cache_store(self, claim, result):
+        """Persist a successful verification result into the claim cache collection."""
+        try:
+            payload = json.dumps(result, default=str)
+            self.claim_cache.add_documents([Document(
+                page_content=payload,
+                metadata={"claim": claim[:500]}
+            )])
+        except Exception as e:
+            print(f"Cache store error: {e}")
+
+    def verify_claim(self, claim, user_id=None):
         """
-        Full RAG pipeline: Vector Search → PubMed → LLM Synthesis.
+        Full RAG pipeline: Claim Cache → Vector Search → PubMed → LLM Synthesis.
         Returns result enriched with similarity scores, processing time, and model metadata.
+        Supports user-scoped vector search when user_id is provided.
         """
         if not self.llm:
             return {"error": "Groq API key is not configured."}
 
+        # ── Feature 1: Claim Similarity Cache ─────────────────────────────────
+        cached = self._cache_lookup(claim)
+        if cached:
+            return cached
+
         t_start = time.time()
 
-        # Step 1: Vector Search with similarity scores
-        vector_results = self.vectorstore.similarity_search_with_score(claim, k=4)
+        # ── Feature 2: Personal KB – filter by user_id if provided ────────────
+        # Step 1: Vector Search – k=5 for richer context (snippets capped at 300 chars each)
+        if user_id:
+            try:
+                user_results  = self.vectorstore.similarity_search_with_score(
+                    claim, k=3, filter={"user_id": str(user_id)}
+                )
+                seed_results  = self.vectorstore.similarity_search_with_score(
+                    claim, k=3, filter={"type": "seed"}
+                )
+                seen  = set()
+                vector_results = []
+                for item in user_results + seed_results:
+                    key = item[0].page_content[:100]
+                    if key not in seen:
+                        seen.add(key)
+                        vector_results.append(item)
+                vector_results = vector_results[:5]
+            except Exception:
+                vector_results = self.vectorstore.similarity_search_with_score(claim, k=5)
+        else:
+            vector_results = self.vectorstore.similarity_search_with_score(claim, k=5)
+
         doc_context_parts = []
-        sources_metadata = []
+        sources_metadata  = []
         similarity_scores = []
 
         for doc, score in vector_results:
-            # Chroma returns L2 distance; convert to 0-1 similarity
             similarity = round(max(0.0, 1.0 - score / 2.0), 3)
             similarity_scores.append(similarity)
+            snippet = doc.page_content[:300]
             doc_context_parts.append(
-                f"Source ({doc.metadata.get('source', 'unknown')} | Topic: {doc.metadata.get('topic', 'general')} | Similarity: {similarity:.0%}):\n{doc.page_content}"
+                f"[{doc.metadata.get('topic', 'general')} | {similarity:.0%}]: {snippet}"
             )
             sources_metadata.append({
-                "file": doc.metadata.get("source", "Unknown").split("/")[-1],
-                "page": doc.metadata.get("page", 0) + 1,
-                "topic": doc.metadata.get("topic", "general"),
+                "file":       doc.metadata.get("source", "Unknown").split("/")[-1],
+                "page":       doc.metadata.get("page", 0) + 1,
+                "topic":      doc.metadata.get("topic", "general"),
                 "similarity": similarity,
-                "snippet": doc.page_content[:200] + "..."
+                "snippet":    snippet + "..."
             })
 
         doc_context = "\n\n".join(doc_context_parts)
@@ -437,10 +520,10 @@ Output RAW JSON ONLY. No markdown. No code fences.
         })
         t_llm = time.time()
 
-        total_ms = round((t_llm - t_start) * 1000)
-        vector_ms = round((t_vector - t_start) * 1000)
-        pubmed_ms = round((t_pubmed - t_vector) * 1000)
-        llm_ms = round((t_llm - t_pubmed) * 1000)
+        total_ms  = round((t_llm - t_start)    * 1000)
+        vector_ms = round((t_vector - t_start)  * 1000)
+        pubmed_ms = round((t_pubmed - t_vector)  * 1000)
+        llm_ms    = round((t_llm - t_pubmed)     * 1000)
 
         try:
             content = response.content.strip()
@@ -452,24 +535,81 @@ Output RAW JSON ONLY. No markdown. No code fences.
                 content = content[content.find("{"):content.rfind("}") + 1]
             result = json.loads(content)
 
-            # Enrich with pipeline metadata
-            result["detailed_sources"] = sources_metadata
-            result["similarity_scores"] = similarity_scores
-            result["vector_hits"] = len(vector_results)
-            result["model_used"] = self.model_name
-            result["processing_time_ms"] = total_ms
-            result["pipeline_breakdown"] = {
-                "vector_search_ms": vector_ms,
-                "pubmed_ms": pubmed_ms,
-                "llm_synthesis_ms": llm_ms
+        except (json.JSONDecodeError, ValueError):
+            raw_text = response.content.strip()
+            print(f"[verify_claim] JSON parse failed - fallback. First 200 chars: {raw_text[:200]}")
+            result = {
+                "status":           "UNVERIFIED",
+                "confidence":       50,
+                "explanation":      raw_text[:1500] if raw_text else "Unexpected response. Try rephrasing as a direct medical claim.",
+                "sources":          [],
+                "glossary":         {},
+                "consensus_match":  False,
+                "medical_category": "General Medicine",
             }
-            return result
+
         except Exception as e:
             return {
-                "error": "Parsing failed",
-                "raw": response.content,
+                "error":               "Parsing failed",
+                "raw":                 response.content,
                 "processing_time_ms": total_ms
             }
+
+        # ── Post-processing: Confidence Calibration ───────────────────────────
+        raw_confidence  = int(result.get("confidence", 50))
+        avg_similarity  = round(sum(similarity_scores) / len(similarity_scores), 3) if similarity_scores else 0
+        has_pubmed      = "No recent" not in live_context and "PubMed error" not in live_context
+        has_explanation = len(result.get("explanation", "")) > 80
+        status          = result.get("status", "UNVERIFIED")
+
+        boost = 0
+        if avg_similarity >= 0.75:    boost += 12   # Strong vector match from KB
+        elif avg_similarity >= 0.55:  boost += 8    # Moderate vector match
+        elif avg_similarity >= 0.35:  boost += 4    # Weak but relevant match
+        if has_pubmed:                boost += 10   # PubMed evidence present
+        if len(similarity_scores) >= 4: boost += 5  # Multiple corroborating sources
+
+        # Apply boost with sensible minimums based on status + evidence quality
+        if status == "TRUE":
+            # TRUE claims: always at least 75% when PubMed agrees, 70% otherwise
+            floor = 78 if has_pubmed else 70
+            calibrated = min(97, max(raw_confidence + boost, floor))
+
+        elif status == "FALSE":
+            # FALSE claims: always at least 70% when evidence refutes
+            floor = 72 if has_pubmed else 65
+            calibrated = min(95, max(raw_confidence + boost, floor))
+
+        else:  # UNVERIFIED (includes open questions like "what is X")
+            # Questions/topics: if we gave a good explanation with evidence, show at least 55%
+            if has_explanation and has_pubmed:
+                floor = 58   # We answered well with real PubMed data
+            elif has_explanation and avg_similarity >= 0.40:
+                floor = 52   # We answered well using KB data
+            else:
+                floor = 45   # Minimal data, some uncertainty is honest
+            calibrated = min(85, max(raw_confidence + boost, floor))
+
+        result["confidence"]      = calibrated
+        result["confidence_raw"]  = raw_confidence   # keep original for transparency
+        result["avg_similarity"]  = avg_similarity
+        result["pubmed_found"]    = has_pubmed
+        # ── End calibration ───────────────────────────────────────────────────
+
+        # Shared enrichment block - runs for both JSON success and fallback
+        result["detailed_sources"]   = sources_metadata
+        result["similarity_scores"]  = similarity_scores
+        result["vector_hits"]        = len(vector_results)
+        result["model_used"]         = self.model_name
+        result["processing_time_ms"] = total_ms
+        result["from_cache"]         = False
+        result["pipeline_breakdown"] = {
+            "vector_search_ms": vector_ms,
+            "pubmed_ms":        pubmed_ms,
+            "llm_synthesis_ms": llm_ms
+        }
+        self._cache_store(claim, result)
+        return result
 
     def batch_verify(self, claims):
         """

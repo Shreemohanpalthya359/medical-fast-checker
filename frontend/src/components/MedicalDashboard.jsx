@@ -10,7 +10,7 @@ import {
 import { 
   uploadDocument, factCheckClaim, analyzeImage, 
   getHistory, downloadReport, logout,
-  batchFactCheck, getStats, getKbStatus
+  batchFactCheck, getStats, getKbStatus, submitFeedback, getHealthFeed
 } from '../api';
 
 const MedicalDashboard = () => {
@@ -23,6 +23,7 @@ const MedicalDashboard = () => {
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState(null);
   const [kbStatus, setKbStatus] = useState(null);
+  const [healthFeed, setHealthFeed] = useState([]);
   
   const [showHistory, setShowHistory] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -36,6 +37,7 @@ const MedicalDashboard = () => {
   useEffect(() => {
     fetchHistory();
     fetchStatsAndKb();
+    fetchFeed();
     // Initialize Speech Recognition
     if ('webkitSpeechRecognition' in window) {
       const recognition = new window.webkitSpeechRecognition();
@@ -61,7 +63,17 @@ const MedicalDashboard = () => {
     }
   };
 
+  const fetchFeed = async () => {
+    try {
+      const data = await getHealthFeed();
+      setHealthFeed(data.articles || []);
+    } catch (err) {
+      console.error("Failed to fetch health feed", err);
+    }
+  };
+
   const fetchStatsAndKb = async () => {
+
     try {
       const [s, k] = await Promise.all([getStats(), getKbStatus()]);
       setStats(s);
@@ -189,14 +201,24 @@ const MedicalDashboard = () => {
   const PipelineVisualizer = ({ result }) => {
     if (!result || !result.pipeline_breakdown) return null;
     return (
-      <div className="flex items-center gap-2 text-[10px] uppercase font-black tracking-widest text-slate-500 mt-6 pt-6 border-t border-white/5">
-        <span className="flex items-center gap-1"><Database className="w-3 h-3 text-emerald-500"/> {result.pipeline_breakdown.vector_search_ms}ms Vector</span>
-        <ArrowRight className="w-3 h-3" />
-        <span className="flex items-center gap-1"><Activity className="w-3 h-3 text-blue-500"/> {result.pipeline_breakdown.pubmed_ms}ms PubMed</span>
-        <ArrowRight className="w-3 h-3" />
-        <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500"/> {result.pipeline_breakdown.llm_synthesis_ms}ms LLM ({result.model_used})</span>
-        <div className="flex-1"></div>
-        <span className="text-teal-400 font-bold">TOTAL: {result.processing_time_ms}ms</span>
+      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase font-black tracking-widest text-slate-500 mt-6 pt-6 border-t border-white/5">
+        {result.from_cache ? (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25 text-[10px] font-black">
+            ⚡ Cached Result
+          </span>
+        ) : (
+          <>
+            <span className="flex items-center gap-1"><Database className="w-3 h-3 text-emerald-500"/> {result.pipeline_breakdown.vector_search_ms}ms Vector</span>
+            <ArrowRight className="w-3 h-3" />
+            <span className="flex items-center gap-1"><Activity className="w-3 h-3 text-blue-500"/> {result.pipeline_breakdown.pubmed_ms}ms PubMed</span>
+            <ArrowRight className="w-3 h-3" />
+            <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500"/> {result.pipeline_breakdown.llm_synthesis_ms}ms LLM ({result.model_used})</span>
+          </>
+        )}
+        <div className="flex-1" />
+        <span className="text-teal-400 font-bold">
+          {result.from_cache ? '⚡ 0ms (Cache)' : `TOTAL: ${result.processing_time_ms}ms`}
+        </span>
       </div>
     );
   };
@@ -479,6 +501,36 @@ const MedicalDashboard = () => {
                    <div className="text-3xl font-black medical-gradient-text relative z-10">{stats?.avg_confidence || 0}%</div>
                    <div className="text-[10px] uppercase font-black tracking-widest text-slate-500 mt-2 relative z-10">Avg Confidence</div>
                 </div>
+              </div>
+
+              {/* WHO/CDC Live Health Feed */}
+              <div className="glass-panel p-8 rounded-3xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <h3 className="text-lg font-bold">WHO / CDC Live Health Feed</h3>
+                  <span className="ml-auto text-[9px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-full">LIVE</span>
+                </div>
+                {healthFeed.length === 0 ? (
+                  <p className="text-sm text-slate-500 italic">Loading advisories… (requires internet)</p>
+                ) : (
+                  <div className="space-y-4">
+                    {healthFeed.map((article, i) => (
+                      <a key={i} href={article.link} target="_blank" rel="noopener noreferrer"
+                        className="flex items-start gap-4 p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-teal-500/20 transition-all group">
+                        <span className={`text-[9px] font-black px-2 py-1 rounded-full border flex-shrink-0 mt-0.5
+                          ${article.source === 'WHO' ? 'bg-blue-500/15 text-blue-400 border-blue-500/25' : 'bg-rose-500/15 text-rose-400 border-rose-500/25'}`}>
+                          {article.source}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-200 group-hover:text-teal-300 transition-colors line-clamp-1">{article.title}</p>
+                          {article.summary && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">{article.summary}</p>}
+                          <p className="text-[10px] text-slate-600 mt-1">{article.published}</p>
+                        </div>
+                        <ExternalLink className="w-3.5 h-3.5 text-slate-600 group-hover:text-teal-400 flex-shrink-0 mt-1 transition-colors" />
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

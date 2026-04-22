@@ -80,4 +80,14 @@ export const downloadReport = async (checkId) => {
   link.setAttribute('download', `medical_report_${checkId}.pdf`);
   document.body.appendChild(link);
   link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+export const submitFeedback = async (checkId, rating) => {
+  return (await api.post(`/feedback/${checkId}`, { rating })).data;
+};
+
+export const getHealthFeed = async () => {
+  return (await api.get('/health-feed')).data;
 };
