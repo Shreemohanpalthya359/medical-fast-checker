@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: aegis-medical-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: >
+      pip install -r requirements.txt &&
+      python -c "from langchain_huggingface import HuggingFaceEmbeddings; HuggingFaceEmbeddings(model_name='all-MiniLM-L6-v2')"
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: PUBMED_EMAIL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+    healthCheckPath: /api/stats
