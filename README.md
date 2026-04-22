@@ -72,21 +72,28 @@ We specifically engineered the stack to prioritize maximum throughput, zero-late
 graph TD
     A[User Frontend UI] -->|Submits Claim/Image/PDF| B(Flask API Gateway)
     
-    subparse[Document Processing]
+    B -->|Health Feed Tab| HF[WHO/CDC RSS FeedParser]
+    HF -->|Latest Advisories| A
+
+    B -->|Claim Strings| CC{Claim Cache Match >= 95%}
+    CC -->|Cache Hit| A
+    
+    CC -->|Cache Miss| E[HuggingFace Embedder]
     B -->|Direct Image| C[Llama 4 Scout Vision Edge]
     B -->|PDF Uploads| D[PyPDFLoader Text Extraction]
-    B -->|Claim Strings| E[HuggingFace Embedder]
+    D -->|User-tagged| F
     
-    E -->|Similarity Metric| F[(ChromaDB Vector Store)]
-    F -->|Top-k Curated Hits| G
+    E -->|Similarity Metric| F[(ChromaDB: Global + Personal KB)]
+    F -->|Top-5 Curated Hits| G
     
     B -->|Async Scrape| H[Bio.Entrez PubMed API]
     H -->|Latest Academic Abstracts| G
     
     G{Meta-Llama Context Aggregator} -->|Prompt Template Injection| I[Groq Llama-3.1-8B]
     
-    I -->|Verification Verdict & JSON| J[Telemetry & Stats SQLite]
-    I -->|Clinical Answer| A
+    I -->|Raw Verification| J[Confidence Calibration System]
+    J -->|Post-processing Boost| K[Telemetry & Stats SQLite]
+    K -->|Clinical Answer| A
 ```
 
 ### 📂 Project Folder Structure
@@ -112,14 +119,14 @@ medical-fact-checker/
 
 Our Hybrid-RAG pipeline is designed to fuse local knowledge with live external consensus:
 
-1. **Query Ingestion:** The user uploads a claim (text), a batch of claims, a PDF document, or an Image (MRI/Report).
+1. **Query Ingestion & Caching:** The user uploads a claim or document. Before processing, the system checks the **ChromaDB Claim Cache**. Near-identical searches (>=95% similarity) return instantly.
 2. **Document Processing:** 
     - Images are directly routed to the **Llama 4 Scout** multi-modal edge vision model via Groq.
-    - PDF documents are parsed via `PyPDFLoader` and injected into the pipeline as clean context text.
-3. **Vector Semantic Search:** The query is embedded via `HuggingFace`. ChromaDB runs nearest-neighbor metrics to retrieve the top 4 highly relevant curated medical chunks from our pre-seeded Knowledge Base.
-4. **Live PubMed Consensus:** The engine fires an asynchronous request to the NIH PubMed database to grab the top 3 live published academic abstracts relating to the query.
-5. **LLM Synthesis:** The context (Vector Hits + PubMed Consensus + Context + The Claim) are injected into a strict `PromptTemplate`. **Llama 3.1 8B** synthesizes the verdict.
-6. **Telemetry & Client Parsing:** Processing millisecond timing, verdicts, and confidence scores are pushed to SQLite for the Analytics Dashboard, and routed to the UI.
+    - PDF documents are chunked and linked directly to your **Personal Knowledge Base** via user profiles.
+3. **Vector Semantic Search:** The query is embedded via `HuggingFace`. ChromaDB runs nearest-neighbor metrics to retrieve the top 5 highly relevant curated chunks from the generalized medical store AND your scoped personal doc records.
+4. **Live Live Consensus:** The engine fires an asynchronous request to the NIH PubMed database to grab the most relevant live academic abstracts, alongside fetching live public health advisories from global **WHO/CDC RSS Feeds**.
+5. **LLM Synthesis & Calibration:** The combined context is injected into a strict `PromptTemplate`. **Llama 3.1 8B** synthesizes the verdict. The result then moves through a **Confidence Calibration System** that adjusts the final confidence percentage based on strict verification floors and multi-source corroboration bonuses.
+6. **Telemetry & Client Parsing:** Processing millisecond timing, validated verdicts, and confidence scores are pushed to SQLite for the Analytics Dashboard, and routed back to the premium Framer UI.
 
 <br/>
 
@@ -130,6 +137,11 @@ Our Hybrid-RAG pipeline is designed to fuse local knowledge with live external c
 * **Knowledge Base Explorer:** See exactly what medical topics (Cardiology, Immunology, Pharmacology) exist inside your Vector Store.
 * **Multi-Modal Image & PDF Analysis:** Upload PDF reports or real image scans (`.jpg`, `.png`). The AI extracts detected symptoms, flags abnormal values, and lists explicit precautions.
 * **Real-time Voice Synthesis:** Full Audio dictation of medical explanations using Web Speech APIs.
+* **Claim Similarity Cache:** Near-identical claims return instantly from a ChromaDB cache with lightning-fast ~0ms latency.
+* **Personal Knowledge Base:** Uploaded PDFs are tagged to your user profile, enabling vector searches routed against your own clinical documents.
+* **Live WHO/CDC Health Feed:** Integrated RSS parsing dynamically fetches the latest medical advisories and health news directly from global health authorities.
+* **Confidence Calibration System:** Advanced algorithmic confidence scoring combining base LLM certainty, vector similarity boosts, and multi-source corroboration metrics to ensure trustworthy verdicts.
+* **Premium Physics UIs:** A fully redesigned, aesthetic frontend utilizing Framer Motion physics to deliver an engaging, fluid enterprise user experience.
 
 <br/>
 
