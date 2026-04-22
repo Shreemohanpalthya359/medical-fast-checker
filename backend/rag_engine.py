@@ -6,10 +6,10 @@ import time
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.prompts import PromptTemplate
-from langchain.schema import Document
+from langchain_core.prompts import PromptTemplate
+from langchain_core.documents import Document
 from dotenv import load_dotenv
 from Bio import Entrez
 
@@ -243,7 +243,7 @@ Required JSON keys:
                 docs = loader.load()
                 report_text = "\n".join([d.page_content for d in docs])[:6000]
 
-                from langchain.prompts import PromptTemplate
+                from langchain_core.prompts import PromptTemplate
                 pdf_prompt = PromptTemplate(
                     template="""You are a clinical AI assistant. Here is a medical report:
 
