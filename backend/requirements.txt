@@ -16,3 +16,4 @@ google-genai
 biopython
 fpdf2
 feedparser
+gunicorn
